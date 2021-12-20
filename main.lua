@@ -48,8 +48,8 @@ local function urlencode(url)
         return
     end
     url = url:gsub("\n", "\r\n")
-    url = url:gsub("([^%w ])", char_to_hex)
-    url = url:gsub(" ", "+")
+    url = url:gsub("([^%w])", char_to_hex)
+    --url = url:gsub(" ", "+")
     return url
 end
 
@@ -63,8 +63,8 @@ local function load_files(magnet_uri, files)
         return table.concat(a.path, "/") < table.concat(b.path, "/")
     end);
 
-    --local infohash = magnet_uri:match("magnet:%?xt=urn:btih:(%w+)")
-
+    local infohash = magnet_uri:match("magnet:%?xt=urn:btih:(%w+)")
+    --local ignore_files = {}
     local flag = "replace"
     for _, fileinfo in ipairs(magnet_info.files) do
         local path = table.concat(fileinfo.path, "/")
@@ -76,35 +76,31 @@ local function load_files(magnet_uri, files)
             for _, fileinfo2 in ipairs(magnet_info.files) do
                 local path2 = table.concat(fileinfo2.path, "/")
                 if path2 ~= path and path2:find(basename, 1, true) ~= nil then
-                    local name = path2
-                    if #fileinfo2.path > 1 then
-                        name = fileinfo2.path[#fileinfo2.path - 1]
-                    end
-                    mp.msg.info(path2 .. " found!! - " .. name)
-
-                    table.insert(add_files, confluence_server .. "/data?magnet=" .. magnet_uri .. "&path=" .. urlencode(path2) .. "#/" .. name)
+                    mp.msg.info("->" .. path2)
+                    table.insert(add_files, confluence_server .. "/data/magnet/" .. urlencode(magnet_uri)  .. "/" .. path2)
+                    --table.insert(ignore_files, path2)
                 end
             end
         end
-		if not (ext == "m3u" or ext == "m3u8") then
         local options = {}
         options["external-files"] = table.concat(add_files, ';')
-	        --options["force-media-title"] = path
-	        mp.command_native { "loadfile",
-	                            confluence_server .. "/data?magnet=" .. magnet_uri .. "&path=" .. urlencode(path) .. "#/" .. path,
-	                            flag,
-	                            options
-	        }
-	
-	        if flag == "replace" then
-	            flag = "append"
-	        end
-		end
+        --options["force-media-title"] = path
+        mp.command_native { "loadfile",
+                            confluence_server .. "/data/magnet/" .. urlencode(magnet_uri) .. "/" .. path,
+                            flag,
+                            options
+        }
+
+        -- replace the current file(magnet), then append to playlist
+        if flag == "replace" then
+            flag = "append"
+        end
     end
 end
 
 mp.add_hook("on_load", 20, function()
     local url = mp.get_property("stream-open-filename")
+    local suffix = ""
     if url:find("^magnet:") == 1 then
         magnet_info = get_magnet_info(url)
         if type(magnet_info) == "table" then
@@ -116,9 +112,9 @@ mp.add_hook("on_load", 20, function()
             end
             -- if not a playlist and has a name
             if magnet_info.name then
-                mp.set_property("force-media-title", magnet_info.name)
+                suffix = "#/" .. magnet_info.name -- default file name
             end
         end
-        mp.set_property("stream-open-filename", confluence_server .. "/data?magnet=" .. url)
+        mp.set_property("stream-open-filename", confluence_server .. "/data?magnet=" .. url .. suffix)
     end
 end)
