@@ -67,41 +67,45 @@ local function load_files(magnet_uri, files)
     --local ignore_files = {}
     local flag = "replace"
     for _, fileinfo in ipairs(magnet_info.files) do
-        local path = table.concat(fileinfo.path, "/")
-        local basename, ext = path:match('([^/]+)%.(%w+)$')
-        local add_files = {}
-        if basename ~= nil and (ext == "mkv" or ext == "mp4" or ext == "avi" or ext == "wmv" or ext == "vob" or ext == "m2ts" or ext == "ogm") then
-            mp.msg.info(basename .. " is " .. ext)
+        if fileinfo.processed ~= true then
+            local path = table.concat(fileinfo.path, "/")
+            local basename, ext = path:match('([^/]+)%.(%w+)$')
+            local add_files = {}
+            if basename ~= nil and (ext == "mkv" or ext == "mp4" or ext == "avi" or ext == "wmv" or ext == "vob" or ext == "m2ts" or ext == "ogm") then
+                mp.msg.info(basename .. " is " .. ext)
 
-            for _, fileinfo2 in ipairs(magnet_info.files) do
-                local path2 = table.concat(fileinfo2.path, "/")
-                if path2 ~= path and path2:find(basename, 1, true) ~= nil then
-                    mp.msg.info("->" .. path2)
-                    table.insert(add_files, confluence_server .. "/data/magnet/" .. urlencode(magnet_uri)  .. "/" .. path2)
-                    --table.insert(ignore_files, path2)
+                for _, fileinfo2 in ipairs(magnet_info.files) do
+                    local path2 = table.concat(fileinfo2.path, "/")
+                    if path2 ~= path and path2:find(basename, 1, true) ~= nil then
+                        mp.msg.info("->" .. path2)
+                        table.insert(add_files, confluence_server .. "/data/infohash/" .. infohash .. "/" .. path2)
+                        fileinfo2.processed = true
+                    end
                 end
             end
-        end
-        local options = {}
-        options["external-files"] = table.concat(add_files, ';')
-        --options["force-media-title"] = path
-        mp.command_native { "loadfile",
-                            confluence_server .. "/data/magnet/" .. urlencode(magnet_uri) .. "/" .. path,
-                            flag,
-                            options
-        }
+            local options = {}
+            --if #add_files > 0 then
+            options["external-files"] = table.concat(add_files, ';')
+            --end
+            --options["force-media-title"] = path
+            mp.command_native { "loadfile",
+                                confluence_server .. "/data/infohash/" .. infohash .. "/" .. path,
+                                flag,
+                                options
+            }
 
-        -- replace the current file(magnet), then append to playlist
-        if flag == "replace" then
-            flag = "append"
+            -- replace the current file(magnet), then append to playlist
+            if flag == "replace" then
+                flag = "append"
+            end
         end
     end
 end
 
 mp.add_hook("on_load", 20, function()
     local url = mp.get_property("stream-open-filename")
-    local suffix = ""
     if url:find("^magnet:") == 1 then
+        local suffix = ""
         magnet_info = get_magnet_info(url)
         if type(magnet_info) == "table" then
             --magnet_info.pieces = "(value optimised out)"
