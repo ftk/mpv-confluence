@@ -39,79 +39,101 @@ local function get_magnet_info(url)
     return bencode.decode(res)
 end
 
-local char_to_hex = function(c)
-    return string.format("%%%02X", string.byte(c))
+local function edlencode(url)
+    return "%" .. string.len(url) .. "%" .. url
 end
 
-local function urlencode(url)
-    if url == nil then
-        return
+local function guess_type_by_extension(ext)
+    if ext == "mkv" or ext == "mp4" or ext == "avi" or ext == "wmv" or ext == "vob" or ext == "m2ts" or ext == "ogm" then
+        return "video"
     end
-    url = url:gsub("\n", "\r\n")
-    url = url:gsub("([^%w])", char_to_hex)
-    --url = url:gsub(" ", "+")
-    return url
+    if ext == "mka" or ext == "mp3" or ext == "aac" or ext == "flac" or ext == "ogg" or ext == "wma" or ext == "mpg" or ext == "wav" or ext == "wv" or ext == "opus" then
+        return "audio"
+    end
+    if ext == "ass" or ext == "srt" or ext == "vtt" then
+        return "sub"
+    end
+    return "other";
 end
 
-local function load_files(magnet_uri, files)
+
+-- https://github.com/mpv-player/mpv/blob/master/DOCS/edl-mpv.rst
+local function generate_m3u(magnet_uri, files)
+    for _, fileinfo in ipairs(files) do
+        local ext = string.match(fileinfo.path[#fileinfo.path], "%.(%w+)$")
+        fileinfo.type = guess_type_by_extension(ext)
+    end
     table.sort(files, function(a, b)
         -- make top-level files appear first in the playlist
         if (#a.path == 1 or #b.path == 1) and #a.path ~= #b.path then
             return #a.path < #b.path
+        end
+        -- make videos first
+        if (a.type == "video" or b.type == "video") and a.type ~= b.type then
+            return a.type == "video"
         end
         -- otherwise sort by path
         return table.concat(a.path, "/") < table.concat(b.path, "/")
     end);
 
     local infohash = magnet_uri:match("magnet:%?xt=urn:btih:(%w+)")
-    --local ignore_files = {}
-    local flag = "replace"
-    for _, fileinfo in ipairs(magnet_info.files) do
+
+    local playlist = { '#EXTM3U' }
+
+    for _, fileinfo in ipairs(files) do
         if fileinfo.processed ~= true then
             local path = table.concat(fileinfo.path, "/")
-            local basename, ext = path:match('([^/]+)%.(%w+)$')
-            local add_files = {}
-            if basename ~= nil and (ext == "mkv" or ext == "mp4" or ext == "avi" or ext == "wmv" or ext == "vob" or ext == "m2ts" or ext == "ogm") then
-                mp.msg.info(basename .. " is " .. ext)
+            table.insert(playlist, '#EXTINF:-1,' .. path)
+            local basename = string.match(fileinfo.path[#fileinfo.path], '^(.+)%.%w+$')
 
-                for _, fileinfo2 in ipairs(magnet_info.files) do
-                    local path2 = table.concat(fileinfo2.path, "/")
-                    if path2 ~= path and path2:find(basename, 1, true) ~= nil then
+            local url = confluence_server .. "/data/infohash/" .. infohash .. "/" .. path
+            local edl = "edl://!new_stream;!no_clip;!no_chapters;" .. edlencode(url) .. ";"
+            local external_tracks = 0
+
+            fileinfo.processed = true
+            if basename ~= nil and fileinfo.type == "video" then
+                mp.msg.info("!" .. basename)
+
+                for _, fileinfo2 in ipairs(files) do
+                    if #fileinfo2.path > 0 and
+                            fileinfo2.type ~= "other" and
+                            fileinfo2.processed ~= true and
+                            string.find(fileinfo2.path[#fileinfo2.path], basename, 1, true) ~= nil
+                    then
+                        local path2 = table.concat(fileinfo2.path, "/")
                         mp.msg.info("->" .. path2)
-                        table.insert(add_files, confluence_server .. "/data/infohash/" .. infohash .. "/" .. path2)
+                        local url = confluence_server .. "/data/infohash/" .. infohash .. "/" .. path2
+                        local hdr = { "!new_stream", "!no_clip", "!no_chapters",
+                                      "!delay_open,media_type=" .. fileinfo2.type,
+                                      "!track_meta,title=" .. edlencode(path2),
+                                      edlencode(url)
+                        }
+                        edl = edl .. table.concat(hdr, ";") .. ";"
                         fileinfo2.processed = true
+                        external_tracks = external_tracks + 1
                     end
                 end
             end
-            local options = {}
-            --if #add_files > 0 then
-            options["external-files"] = table.concat(add_files, ';')
-            --end
-            --options["force-media-title"] = path
-            mp.command_native { "loadfile",
-                                confluence_server .. "/data/infohash/" .. infohash .. "/" .. path,
-                                flag,
-                                options
-            }
-
-            -- replace the current file(magnet), then append to playlist
-            if flag == "replace" then
-                flag = "append"
+            if external_tracks == 0 then -- dont use edl
+                table.insert(playlist, url)
+            else
+                table.insert(playlist, edl)
             end
         end
     end
+    return table.concat(playlist, '\n')
 end
 
 mp.add_hook("on_load", 20, function()
     local url = mp.get_property("stream-open-filename")
     if url:find("^magnet:") == 1 then
         local suffix = ""
-        magnet_info = get_magnet_info(url)
+        local magnet_info = get_magnet_info(url)
         if type(magnet_info) == "table" then
             --magnet_info.pieces = "(value optimised out)"
             if magnet_info.files then
                 -- torrent has multiple files. open as playlist
-                load_files(url, magnet_info.files)
+                mp.set_property("stream-open-filename", "memory://" .. generate_m3u(url, magnet_info.files))
                 return
             end
             -- if not a playlist and has a name
