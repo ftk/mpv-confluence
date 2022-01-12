@@ -1,7 +1,12 @@
 -- https://github.com/anacrolix/confluence
 
-local confluence_server = "http://10.200.200.6:8000"
+-- add "script-opts=mpv_confluence-server=http://[confluence ip]:[port]" to mpv.conf
+local opts = {
+    server = "http://localhost:8080",
+    search_for_external_tracks = true
+}
 
+(require 'mp.options').read_options(opts)
 local luacurl_available, cURL = pcall(require, 'cURL')
 
 -- from: https://github.com/ezdiy/lua-bencode
@@ -76,7 +81,7 @@ end
 -- bencode end
 
 local function get_magnet_info(url)
-    local info_url = confluence_server .. "/info?magnet=" .. url
+    local info_url = opts.server .. "/info?magnet=" .. url
     local res
     if not (luacurl_available) then
         -- if Lua-cURL is not available on this system
@@ -169,7 +174,7 @@ local function generate_m3u(magnet_uri, files)
             table.insert(playlist, '#EXTINF:0,' .. fileinfo.fullpath)
             local basename = string.match(fileinfo.path[#fileinfo.path], '^(.+)%.%w+$')
 
-            local url = confluence_server .. "/data/infohash/" .. infohash .. "/" .. fileinfo.fullpath
+            local url = opts.server .. "/data/infohash/" .. infohash .. "/" .. fileinfo.fullpath
             local hdr = { "!new_stream", "!no_clip",
                           --"!track_meta,title=" .. edlencode(basename),
                           edlencode(url)
@@ -178,7 +183,7 @@ local function generate_m3u(magnet_uri, files)
             local external_tracks = 0
 
             fileinfo.processed = true
-            if basename ~= nil and fileinfo.type == "video" then
+            if opts.search_for_external_tracks and basename ~= nil and fileinfo.type == "video" then
                 mp.msg.info("!" .. basename)
 
                 for _, fileinfo2 in ipairs(files) do
@@ -189,7 +194,7 @@ local function generate_m3u(magnet_uri, files)
                     then
                         mp.msg.info("->" .. fileinfo2.fullpath)
                         local title = string_replace(fileinfo2.fullpath, basename, "%")
-                        local url = confluence_server .. "/data/infohash/" .. infohash .. "/" .. fileinfo2.fullpath
+                        local url = opts.server .. "/data/infohash/" .. infohash .. "/" .. fileinfo2.fullpath
                         local hdr = { "!new_stream", "!no_clip", "!no_chapters",
                                       "!delay_open,media_type=" .. fileinfo2.type,
                                       "!track_meta,title=" .. edlencode(title),
@@ -229,6 +234,6 @@ mp.add_hook("on_load", 5, function()
         else
             mp.msg.warn("magnet bencode error: " .. err)
         end
-        mp.set_property("stream-open-filename", confluence_server .. "/data?magnet=" .. url .. suffix)
+        mp.set_property("stream-open-filename", opts.server .. "/data?magnet=" .. url .. suffix)
     end
 end)
