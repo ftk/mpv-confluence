@@ -219,7 +219,6 @@ end
 mp.add_hook("on_load", 5, function()
     local url = mp.get_property("stream-open-filename")
     if url:find("^magnet:") == 1 then
-        local suffix = ""
         local magnet_info, err = get_magnet_info(url)
         if type(magnet_info) == "table" then
             if magnet_info.files then
@@ -229,11 +228,14 @@ mp.add_hook("on_load", 5, function()
             end
             -- if not a playlist and has a name
             if magnet_info.name then
-                suffix = "#/" .. magnet_info.name -- default file name
+                mp.set_property("stream-open-filename", "memory://#EXTM3U\n" ..
+                        "#EXTINF:0," .. magnet_info.name .. "\n" ..
+                        opts.server .. "/data?magnet=" .. url)
+                return
             end
         else
             mp.msg.warn("magnet bencode error: " .. err)
         end
-        mp.set_property("stream-open-filename", opts.server .. "/data?magnet=" .. url .. suffix)
+        mp.set_property("stream-open-filename", opts.server .. "/data?magnet=" .. url)
     end
 end)
