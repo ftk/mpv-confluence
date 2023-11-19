@@ -1,3 +1,6 @@
+UPDATE: Check out [torrserver branch](https://github.com/ftk/mpv-confluence/tree/torrserver) that works with [TorrServer](https://github.com/YouROK/TorrServer/) by YouROK.
+TorrServer is better maintained and is based on the same [torrent](https://github.com/anacrolix/torrent) library by [anacrolix](https://github.com/anacrolix).
+
 # mpv-confluence
 This script allows you to open magnet links using [confluence](https://github.com/anacrolix/confluence) torrent client.
 
