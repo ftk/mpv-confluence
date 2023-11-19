@@ -7,7 +7,7 @@ It also tries to match external audio and subtitle files with video files.
 ```sh
 git clone -b torrserver https://github.com/ftk/mpv-confluence mpv-torrserver
 ```
-3. (optional) Adjust `server` address in `main.lua` to your TorrServer HTTP address or put `server=http://[TorrServer ip]:[port]` in `mpv/script-settings/mpv-torrserver.conf`
+3. (optional) Adjust `server` address in `main.lua` to your TorrServer HTTP address or put `server=http://[TorrServer ip]:[port]` in `mpv/script-opts/mpv-torrserver.conf`
 4. Open a magnet link in mpv.
 5. (optional) Recommended mpv.conf options:
 ```
