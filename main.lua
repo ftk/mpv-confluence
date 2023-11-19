@@ -1,87 +1,31 @@
--- https://github.com/anacrolix/confluence
+-- Install [Torrserver](https://github.com/YouROK/TorrServer)
+-- then add "script-opts-append=mpv_torrserver-server=http://[TorrServer ip]:[port]" to mpv.conf
 
--- add "script-opts=mpv_confluence-server=http://[confluence ip]:[port]" to mpv.conf
 local opts = {
-    server = "http://localhost:8080",
+    server = "http://localhost:8090",
     search_for_external_tracks = true
 }
 
 (require 'mp.options').read_options(opts)
 local luacurl_available, cURL = pcall(require, 'cURL')
 
--- from: https://github.com/ezdiy/lua-bencode
-local function decode_integer(s, index)
-    local a, b, int = string.find(s, "^(%-?%d+)e", index)
-    if not int then return nil, "not a number", nil end
-    int = tonumber(int)
-    if not int then return nil, "not a number", int end
-    return int, b + 1
+
+local char_to_hex = function(c)
+  return string.format("%%%02X", string.byte(c))
 end
 
-local function decode_list(s, index)
-    local t = {}
-    while string.sub(s, index, index) ~= "e" do
-        local obj, ev
-        obj, index, ev = decode(s, index)
-        if not obj then return obj, index, ev end
-        table.insert(t, obj)
-    end
-    index = index + 1
-    return t, index
+local function urlencode(url)
+  if url == nil then
+    return
+  end
+  url = url:gsub("\n", "\r\n")
+  url = url:gsub("([^%w ])", char_to_hex)
+  url = url:gsub(" ", "+")
+  return url
 end
-
-local function decode_dictionary(s, index)
-    local t = {}
-    while string.sub(s, index, index) ~= "e" do
-        local obj1, obj2, ev
-
-        obj1, index, ev = decode(s, index)
-        if not obj1 then return obj1, index, ev end
-
-        obj2, index, ev = decode(s, index)
-        if not obj2 then return obj2, index, ev end
-
-        t[obj1] = obj2
-    end
-    index = index + 1
-    return t, index
-end
-
-local function decode_string(s, index)
-    local a, b, len = string.find(s, "^([0-9]+):", index)
-    if not len then return nil, "not a length", len end
-    index = b + 1
-
-    local v = string.sub(s, index, index + len - 1)
-    if #v < len - 1 then return nil, "truncated string at end of input", v end
-    index = index + len
-    return v, index
-end
-
-
-function decode(s, index)
-    if not s then return nil, "no data", nil end
-    index = index or 1
-    local t = string.sub(s, index, index)
-    if not t then return nil, "truncation error", nil end
-
-    if t == "i" then
-        return decode_integer(s, index + 1)
-    elseif t == "l" then
-        return decode_list(s, index + 1)
-    elseif t == "d" then
-        return decode_dictionary(s, index + 1)
-    elseif t >= '0' and t <= '9' then
-        return decode_string(s, index)
-    else
-        return nil, "invalid type", t
-    end
-end
-
--- bencode end
 
 local function get_magnet_info(url)
-    local info_url = opts.server .. "/info?magnet=" .. url
+    local info_url = opts.server .. "/stream?stat&link=" .. urlencode(url)
     local res
     if not (luacurl_available) then
         -- if Lua-cURL is not available on this system
@@ -113,7 +57,7 @@ local function get_magnet_info(url)
         res = table.concat(buf)
     end
     if res and res ~= "" then
-        return decode(res)
+        return (require 'mp.utils').parse_json(res)
     else
         return nil, "no info response (timeout?)"
     end
@@ -148,9 +92,16 @@ end
 -- https://github.com/mpv-player/mpv/blob/master/DOCS/edl-mpv.rst
 local function generate_m3u(magnet_uri, files)
     for _, fileinfo in ipairs(files) do
+        -- strip top directory
+        if fileinfo.path:find("/", 1, true) then
+            fileinfo.fullpath = string.sub(fileinfo.path, fileinfo.path:find("/", 1, true) + 1)
+        else
+            fileinfo.fullpath = fileinfo.path
+        end
+        fileinfo.path = {}
+        for w in fileinfo.fullpath:gmatch("([^/]+)") do table.insert(fileinfo.path, w) end
         local ext = string.match(fileinfo.path[#fileinfo.path], "%.(%w+)$")
         fileinfo.type = guess_type_by_extension(ext)
-        fileinfo.fullpath = table.concat(fileinfo.path, "/")
     end
     table.sort(files, function(a, b)
         -- make top-level files appear first in the playlist
@@ -165,7 +116,7 @@ local function generate_m3u(magnet_uri, files)
         return a.fullpath < b.fullpath
     end);
 
-    local infohash = magnet_uri:match("^magnet:%?xt=urn:bt[im]h:(%w+)")
+    local infohash = magnet_uri:match("^magnet:%?xt=urn:bt[im]h:(%w+)") or urlencode(magnet_uri)
 
     local playlist = { '#EXTM3U' }
 
@@ -174,7 +125,7 @@ local function generate_m3u(magnet_uri, files)
             table.insert(playlist, '#EXTINF:0,' .. fileinfo.fullpath)
             local basename = string.match(fileinfo.path[#fileinfo.path], '^(.+)%.%w+$')
 
-            local url = opts.server .. "/data/infohash/" .. infohash .. "/" .. fileinfo.fullpath
+            local url = opts.server .. "/stream/" .. urlencode(fileinfo.fullpath) .."?play&index=" .. fileinfo.id .. "&link=" .. infohash
             local hdr = { "!new_stream", "!no_clip",
                           --"!track_meta,title=" .. edlencode(basename),
                           edlencode(url)
@@ -194,7 +145,7 @@ local function generate_m3u(magnet_uri, files)
                     then
                         mp.msg.info("->" .. fileinfo2.fullpath)
                         local title = string_replace(fileinfo2.fullpath, basename, "%")
-                        local url = opts.server .. "/data/infohash/" .. infohash .. "/" .. fileinfo2.fullpath
+                        local url = opts.server .. "/stream/" .. urlencode(fileinfo2.fullpath).."?play&index=" .. fileinfo2.id .. "&link=" .. infohash
                         local hdr = { "!new_stream", "!no_clip", "!no_chapters",
                                       "!delay_open,media_type=" .. fileinfo2.type,
                                       "!track_meta,title=" .. edlencode(title),
@@ -218,24 +169,25 @@ end
 
 mp.add_hook("on_load", 5, function()
     local url = mp.get_property("stream-open-filename")
-    if url:find("^magnet:") == 1 then
+    if url:find("^magnet:") == 1 or (url:find("^https?://") == 1 and url:find("%.torrent$") ~= nil) then
+        mp.set_property_bool("file-local-options/ytdl", false)
         local magnet_info, err = get_magnet_info(url)
         if type(magnet_info) == "table" then
-            if magnet_info.files then
+            if magnet_info.file_stats then
                 -- torrent has multiple files. open as playlist
-                mp.set_property("stream-open-filename", "memory://" .. generate_m3u(url, magnet_info.files))
+                mp.set_property("stream-open-filename", "memory://" .. generate_m3u(url, magnet_info.file_stats))
                 return
             end
             -- if not a playlist and has a name
             if magnet_info.name then
                 mp.set_property("stream-open-filename", "memory://#EXTM3U\n" ..
                         "#EXTINF:0," .. magnet_info.name .. "\n" ..
-                        opts.server .. "/data?magnet=" .. url)
+                        opts.server .. "/stream?play&index=1&link=" .. urlencode(url))
                 return
             end
         else
-            mp.msg.warn("magnet bencode error: " .. err)
+            mp.msg.warn("error: " .. err)
         end
-        mp.set_property("stream-open-filename", opts.server .. "/data?magnet=" .. url)
+        mp.set_property("stream-open-filename", opts.server .. "/stream?m3u&link=" .. urlencode(url))
     end
 end)
